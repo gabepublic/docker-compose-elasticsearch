@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Docker Static Site</title>
+  <meta charset="UTF-8" />
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  
+  <!-- Mobile Specific Metas
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Favicon
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+  <link rel="icon" type="image/png" href="/static/favicon-32px.png">
+
+  <!-- FONT
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+  <link href="//fonts.googleapis.com/css?family=Raleway:400,300,600" rel="stylesheet" type="text/css">
+
+  <!-- CSS
+  ––––––––––––––––––––––––––––––––––––––––––––––––––
+  <link rel="stylesheet" href="css/normalize.css">
+  <link rel="stylesheet" href="css/skeleton.css"> -->
+  <link rel="stylesheet" href="/static/styles.css" />  
+</head>
+<body>
+  <h1>SF Food Trucks</h1>
+  
+  <div id="search-area">
+    <form onSubmit="handleSearch(); return false;">
+      <input
+        id="query"
+        type="text"
+        onChange=updateQuery()
+      />
+      <button>Search!</button>
+    </form>
+  </div>  
+  
+  <div id="foodtrucks">
+    <ul id="trucklist" class="trucklist">
+    </ul>
+  </div>
+<script async src="/static/test.js"></script>
+</body>
+</html>
