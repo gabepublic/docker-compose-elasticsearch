@@ -3,6 +3,63 @@
 Using docker compose to define a multi-container application that are running 
 in a network created specifically for the application.
 
+## SUMMARY
+
+- The example demonstrates a multi-container docker application that is deployed
+  using docker-compose; the ElasticSearch container and the website container.
+  The website serves webpages and REST API. The REST API connects to the
+  ElasticSearch service in the first container.
+
+- The *website development setup* is demonstrated by: running the ElasticSearch 
+  in the container, but the website is running outside the container in the
+  Python virtual environment. See the "Test web application outside container"
+  section below.  
+
+- The *local deployment of multi containers using the manual method* is
+  demonstrated in the "Test application by starting each containers manually" 
+  section below.
+
+- The *local deployment using the docker compose method* is demonstrated in the
+  "Test application by starting using docker compose" section below.
+
+- Demonstrate the application *deployment to AWS ECS using the Fargate launch type*,
+  a serverless approach, in the "Deploy" > "AWS ECS using docker compose v3" 
+  section below. However, the deployment was not successful due to the limitation
+  of Fargate and the ElasticSearch requirements. May need to revisit in the future. 
+  See alternative approach below using AWS ECS EC2.
+
+- Demonstrate the application *deployment to AWS ECS using the EC2 launch type*
+  in the "Deploy" > "AWS ECS **Launch-type=EC2** using docker compose v2".
+  Several parameters were also reconfigured from the above Fargate deployment.
+  This deployment was succesful and demonstrated the multi-container application.
+
+- **Future refinements of this demo** include:
+  - Make the AWS ECS Fargate approach works for ElasticSearch as this is the 
+    preferred AWS severless approach
+  - This may be possible by using the "elasticsearch:7.6.2" container, 
+    to overcome the
+    `vm.max_map_count [65530] is too low, increase to at least [262144]` error,
+    preventing the container to start, and
+  - Using the docker-compose file version 3, and read the aws documentation
+    on how to specify the followings in the `ecs-params.yml` file:
+```
+services:
+[...]
+    cpu_shares: 100
+    mem_limit: 3621440000
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: foodtrucks
+        awslogs-region: us-west-2
+        awslogs-stream-prefix: es
+[...]
+```    
+
 ## Prerequisite
 
 - Docker Engine - see [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
@@ -146,7 +203,7 @@ For this demo, the ElasticSearch docker image will be pulled from the official
 repository hosted by `elastic.co`, and used without modification. The website
 docker image is built using this repo, as defined in `Dockerfile`.
  
-### Test application outside container
+### Test web application outside container
 
 The website can be revised and tested prior to rebuilding the docker image to
 reduce development time, as follow:
@@ -214,7 +271,7 @@ $ docker rm es
 $ docker image rm docker.elastic.co/elasticsearch/elasticsearch:6.3.2
 ```
 
-### Test application by starting each container manually
+### Test application by starting each containers manually
 
 After building the website docker image, test the application by starting each
 containers (i.e., ElasticSearch and website containers) individually, starting
@@ -505,6 +562,12 @@ This error did not happen on the local deployment as shown above:
 
 Further due dilligence is needed to resolve the issue.
 
+**NOTE:** the error did not occur when using the "ECS -> EC2", self-managed
+deployment, and using the docker compose v2, and ElasticSearch version 7.6.2,
+as demonstrated by 
+[Docker Curriculum - MULTI-CONTAINER ENVIRONMENTS](https://docker-curriculum.com/#multi-container-environments)
+and reproduced below in "AWS ECS **Launch-type=EC2** using docker compose v2".
+
 **Step-by-step:**
 
 - Check `ecs-cli`
@@ -724,91 +787,177 @@ clusters:
 [...]
 ```
 
-### AWS ECS using docker compose v2
+### AWS ECS **Launch-type=EC2** using docker compose v2
+
+Summary:
+- AWS ECS Launch-type=EC2 using t2.medium
+- docker compose v2 and configure the mem_limit (in bytes) and cpu_shares values
+- docker.elastic.co/elasticsearch/elasticsearch:7.6.2
+
+**Step-by-step deployment:**
+
+The following setup tasks can be perfomed manually or by running the scripts
+included with this repo.
 
 - Change directory
 ```
 $ cd <project_folder>/docker-compose-elasticsearch/deploy-aws-v2
 ```
 
-- Setup cluster
+- Ensure the following prerequisites are ready: AWS account; AWS CLI installed &
+  Configured; and AWS ECS CLI installed & profile configured.
+
+- If not already, configure the Amazon ECS CLI cluster for deploying this demo:
+  - As indicated above, we assume the ECS profile, `ecs-tutorial`, has been 
+    configured and the `~/.ecs/credentials` file, has the following:
 ```
-$ ecs-cli up --capability-iam --cluster-config ecs-tutorial --ecs-profile ecs-tutorial --size 1 --instance-type t2.medium
-INFO[0000] Created cluster                               cluster=ecs-cluster-sffoodtrucks region=us-west-2
-INFO[0001] Waiting for your cluster resources to be created...
-INFO[0001] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
-VPC created: vpc-083f5cedb4e4a95eb
-Subnet created: subnet-00c19bba91f3debdb
-Subnet created: subnet-0ba7cd01fedc0242d
-Cluster creation succeeded.
+version: v1
+[...]
+ecs_profiles:
+  ecs-tutorial:
+    aws_access_key_id: <replace_with_actual_id>
+    aws_secret_access_key: <replace_with_actual_secret>
+```  
+  - Create a ECS CLI cluster configuration, which defines the AWS region to use, 
+    resource creation prefixes, and the cluster name to use with the Amazon ECS 
+    CLI; using the `03_create_aws_ecs_cluster_config.sh`:
+```
+$ cd <project_folder>\aws-ecs-docker-php-01\deploy-aws-v2
+$ ./03_create_aws_ecs_cluster_config.sh
+Create a cluster ecs-ec2-tutorial, config ecs-ec2-tutorial, launch type EC2 in us-west-2
+INFO[0000] Saved ECS CLI cluster configuration ecs-ec2-tutorial.
+```
+  - Verify the local `~/.ecs/config` file contains the following:
+```
+version: v1
+[...]
+clusters:
+  ecs-ec2-tutorial:
+    cluster: ecs-ec2-tutorial
+    region: us-west-2
+    default_launch_type: EC2
+[...]
 ```
 
-- - Capture the `VPC_ID` from the above step, and add the Security Group Rule.
-  The script will ask the `VPC_ID`.
+- Setup cluster
 ```
-$ ./05_retrieve_vpc_secinfo.sh
-Enter the VPC_ID (vpc-***)?
-vpc-083f5cedb4e4a95eb
-retrieve the Security GroupId for vpc-083f5cedb4e4a95eb
-{
-    "SecurityGroups": [
-        {
-            "Description": "default VPC security group",
-            "GroupName": "default",
-            "IpPermissions": [
-                {
-                    "IpProtocol": "-1",
-                    "IpRanges": [],
-                    "Ipv6Ranges": [],
-                    "PrefixListIds": [],
-                    "UserIdGroupPairs": [
-                        {
-                            "GroupId": "sg-0fbdf7d4d4805124f",
-                            "UserId": "349327579537"
-                        }
-                    ]
-                }
-            ],
-            "OwnerId": "349327579537",
-            "GroupId": "sg-0fbdf7d4d4805124f",
-            "IpPermissionsEgress": [
-                {
-                    "IpProtocol": "-1",
-                    "IpRanges": [
-                        {
-                            "CidrIp": "0.0.0.0/0"
-                        }
-                    ],
-                    "Ipv6Ranges": [],
-                    "PrefixListIds": [],
-                    "UserIdGroupPairs": []
-                }
-            ],
-            "VpcId": "vpc-083f5cedb4e4a95eb"
-        }
-    ]
-}
-Capture the VPC Security GroupId and continue on the next step...
+$ cd <project_folder>\aws-ecs-docker-php-01\deploy-aws-v2
+$ ./04_create_aws_ecs_cluster_create.sh
+Enter the SSH RSA key-pair?
+<replace-with-real-keypair>
+Create aws cloud cluster based on cli config and profile...
+INFO[0001] Using recommended Amazon Linux 2 AMI with ECS Agent 1.61.3 and Docker version 20.10.13
+INFO[0001] Created cluster                               cluster=ecs-ec2-tutorial region=us-west-2
+INFO[0001] Waiting for your cluster resources to be created...
+INFO[0001] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0062] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0123] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+VPC created: vpc-009636f1d0c0ad22b
+Security Group created: sg-0de3daafac2a77878
+Subnet created: subnet-0cda23b43024c34d2
+Subnet created: subnet-0831d526126a8f3bf
+Cluster creation succeeded.
 ```
 
 - Deploy
 ```
-$ ecs-cli compose up --cluster-config ecs-tutorial --ecs-profile ecs-tutorial
+$ cd <project_folder>\aws-ecs-docker-php-01\deploy-aws-v2
+$ ./07_create_aws_ecs_cluster_deploy.sh
+deploy the cluster
+INFO[0000] Using ECS task definition                     TaskDefinition="deploy-aws-v2:2"
+INFO[0000] Created Log Group foodtrucks in us-west-2
+WARN[0000] Failed to create log group foodtrucks in us-west-2: The specified log group already exists
+INFO[0000] Auto-enabling ECS Managed Tags
+INFO[0001] Starting container...                         container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es
+INFO[0001] Starting container...                         container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web
+INFO[0001] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=RUNNING lastStatus=PENDING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0001] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition="deploy-aws-v2:2"
+INFO[0013] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=RUNNING lastStatus=PENDING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0013] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition="deploy-aws-v2:2"
+INFO[0026] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=RUNNING lastStatus=PENDING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0026] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition="deploy-aws-v2:2"
+INFO[0038] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=RUNNING lastStatus=PENDING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0038] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition="deploy-aws-v2:2"
+INFO[0050] Started container...                          container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=RUNNING lastStatus=RUNNING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0050] Started container...                          container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=RUNNING lastStatus=RUNNING taskDefinition="deploy-aws-v2:2"
 ```
 
 - Check containers
 ```
-$ ecs-cli ps --cluster-config ecs-tutorial --ecs-profile ecs-tutorial
+$ cd <project_folder>\aws-ecs-docker-php-01\deploy-aws-v2
+$ ./08_view_running_containers.sh
+Name                                                   State    Ports                      TaskDefinition   Health
+ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web  RUNNING  35.92.75.208:80->5000/tcp  deploy-aws-v2:2  UNKNOWN
+ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es   RUNNING
 ```
 
-- Cleanup
+- Cleanup, as discussed below
+
+
+#### CLEANUP
+
+- Delete the service so that it stops the existing containers and does not try 
+  to run any more tasks. Then take down your cluster, which cleans up the 
+  resources that you created earlier with ecs-cli up. Both tasks have been
+  included in the `11_cleanup_aws_ecs_cluster.sh` script:
 ```
-$ ecs-cli down --force --cluster-config ecs-tutorial --ecs-profile ecs-tutorial
+$ cd <project_folder>\aws-ecs-docker-php-01\deploy-aws-v2
+$ ./11_cleanup_aws_ecs_cluster.sh
+INFO[0000] Stopping container...                         container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web
+INFO[0000] Stopping container...                         container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es
+INFO[0000] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=STOPPED lastStatus=RUNNING
+ taskDefinition="deploy-aws-v2:2"
+INFO[0000] Describe ECS container status                 container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=STOPPED lastStatus=RUNNING taskDefinition="deploy-aws-v2:2"
+INFO[0006] Stopped container...                          container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/web desiredStatus=STOPPED lastStatus=STOPPED
+ taskDefinition="deploy-aws-v2:2"
+INFO[0006] Stopped container...                          container=ecs-ec2-tutorial/43e0907cddc847c2a5ab475ab5a3fd8c/es desiredStatus=STOPPED lastStatus=STOPPED taskDefinition="deploy-aws-v2:2"
+INFO[0000] Waiting for your cluster resources to be deleted...
+INFO[0000] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0061] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0122] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0183] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0214] Deleted cluster                               cluster=ecs-ec2-tutorial
 ```
+
+- Delete task definitions, `deploy-aws-v2`, from the AWS console; go to
+  "Amazon Elastic Container Service > Task Definitions" page.
+  - Click the task definitions `deploy-aws-v2`
+  - On the `deploy-aws-v2` task definitions page, select the `deploy-aws-v2:2`
+    Task definition: revision, then "Deregister". That will delete the
+    `deploy-aws-v2` task
+  - Note: the name, `deploy-aws-v2`, was taken from the folder name where the
+    `docker-compose.yml` file resided.  
+
+- Delete the CloudWatch log group, `foodtrucks`, from the AWS Console, go to
+  "CloudWatch > Log groups"
+
+- Delete the role name `ecsTaskExecutionRole` (if no longer needed);
+  use the "AWS console > IAM > Access Management > Roles"
+  
+- Delete the AWS ECS profile `ecs-ec2-sffoodtrucks` (if no longer needed) from the local
+  `~/.ecs/config` file:
+```
+version: v1
+[...]
+clusters:
+  ecs-ec2-sffoodtrucks:
+    cluster: ecs-ec2-sffoodtrucks
+    region: us-west-2
+    default_launch_type: FARGATE
+[...]
+```
+
+- The EC2 instance should have been terminated as well. It will still show on
+  the "EC2 > Instances" for a while but should disappear eventually.
 
 ## Issues to be investigated
 
-- Error during startup of `docker.elastic.co/elasticsearch/elasticsearch:8.3.3`
+- [Resolved] Error during startup of `docker.elastic.co/elasticsearch/elasticsearch:8.3.3`
 ```
 org.elasticsearch.ElasticsearchSecurityException: invalid configuration for xpack.security.transport.ssl - [xpack.security.transport.ssl.enabled] is not set, but the following settings have been configured in elasticsearch.yml : [xpack.security.transport.ssl.keystore.secure_password,xpack.security.transport.ssl.truststore.secure_password]
         at org.elasticsearch.xcore@8.3.3/org.elasticsearch.xpack.core.ssl.SSLService.validateServerConfiguration(SSLService.java:648)
@@ -840,6 +989,13 @@ ERROR: Elasticsearch did not exit normally - check the logs at /usr/share/elasti
 
 ERROR: Elasticsearch exited unexpectedly
 ```
+
+- This error is a known issue with the ECS with Fargate (serverless) deployment,
+and but it seems to be a very low priority (or not to fix) by aws.
+The issue was reported:
+- https://stackoverflow.com/questions/62860516/how-to-increase-the-vm-max-map-count-in-aws-ecs-fargate
+- https://medium.com/@devfire/deploying-the-elk-stack-on-amazon-ecs-part-2-34c841e3b774
+
 
 ## Refereces
 

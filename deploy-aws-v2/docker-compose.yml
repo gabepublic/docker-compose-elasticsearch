@@ -1,15 +1,13 @@
 version: '2'
 services:
   es:
-    image: docker.elastic.co/elasticsearch/elasticsearch:6.3.2
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
     cpu_shares: 100
     mem_limit: 3621440000
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - 9200:9200
     logging:
       driver: awslogs
       options:
@@ -20,11 +18,12 @@ services:
     image: gabepublic/sffoodtruck-site-flask:0.1.0-linux-amd64
     cpu_shares: 100
     mem_limit: 262144000
-    command: python3 app.py
     environment:
       - DEBUG=False
     ports:
-      - 5000:5000
+      - 80:5000
+    links:
+      - es
     logging:
       driver: awslogs
       options:
